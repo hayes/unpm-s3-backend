@@ -1,7 +1,7 @@
 {
   "name": "unpm-s3-backend",
   "version": "0.0.1",
-  "description": "s3 backend for unpm json data",
+  "description": "s3 backend for unpm",
   "main": "index.js",
   "directories": {
     "test": "test"
