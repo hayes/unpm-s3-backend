@@ -1,0 +1,36 @@
+{
+  "name": "unpm-s3-backend",
+  "version": "0.0.1",
+  "description": "s3 backend for unpm json data",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node test/backend.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/hayes/unpm-s3-backend.git"
+  },
+  "keywords": [
+    "unpm",
+    "backend",
+    "fs",
+    "static",
+    "file"
+  ],
+  "author": "Michael Hayes",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hayes/unpm-s3-backend/issues"
+  },
+  "homepage": "https://github.com/hayes/unpm-s3-backend",
+  "devDependencies": {
+    "unpm-backend-test": "0.0.2"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1.15",
+    "through": "^2.3.6"
+  }
+}
