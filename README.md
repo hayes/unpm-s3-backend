@@ -11,7 +11,8 @@ var unpm = require('unpm')
 // Defaults
 var options = {
   // passed to new aws.S3(params) see aws documentation.
-  params: {params: {Bucket: 'no-default-bucket-set'}},
+  s3: {params: {Bucket: 'no-default-bucket-set'}},
+  baseUrl: 'https://s3-us-west-2.amazonaws.com/unpm-s3-backend-test/'
   users: {
     prefix: '~/users/'
     Bucket: 'user-bucket' // no default

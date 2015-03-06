@@ -4,13 +4,7 @@ var qs = require('querystring')
 var aws = require('aws-sdk')
 var through = require('through')
 var PassThrough = require('stream').PassThrough
-
-
-var params = {
-  params: {
-    Bucket: 'unpm-s3-backend-test'
-  }
-}
+var Readable = require('stream').Readable
 
 module.exports = S3Backend
 
@@ -22,7 +16,7 @@ function S3Backend(options) {
   EE.call(this)
 
   this.options = options || {}
-  this.s3 = new aws.S3(options.params)
+  this.s3 = new aws.S3(options.s3)
 }
 
 S3Backend.prototype = Object.create(EE.prototype)
@@ -31,23 +25,36 @@ S3Backend.prototype.constructor = S3Backend
 S3Backend.prototype.getUser = getter('users', '~/users/')
 S3Backend.prototype.setUser = setter('users', '~/users/', 'setUser', 'getUser')
 S3Backend.prototype.removeUser = remover('users', '~/users/', 'removeUser', 'getUser')
+S3Backend.prototype.createUserStream = streamer('users', '~/users/', [])
+S3Backend.prototype._setMeta = setter('meta', '', 'setMeta', 'getMeta')
 S3Backend.prototype.getMeta = getter('meta', '')
-S3Backend.prototype.setMeta = setter('meta', '', 'setMeta', 'getMeta')
 S3Backend.prototype.removeMeta = remover('meta', '', 'removeMeta', 'getMeta')
+S3Backend.prototype.createMetaStream = streamer('meta', '', [])
 S3Backend.prototype.get = getter('store', '~/store/')
 S3Backend.prototype.set = setter('store', '~/store/', 'set', 'get')
 S3Backend.prototype.remove = remover('store', '~/store/', 'remove', 'get')
+S3Backend.prototype.createStream = streamer('store', '~/store/', [])
 
-S3Backend.prototype.createUserStream = function getUser(options) {
-  throw new Error('Not Implemented')
-}
+S3Backend.prototype.setMeta = function setMeta(name, meta, done) {
+  var escaped = escape(name)
+  var baseUrl = this.options.baseUrl || ''
+  if(baseUrl && baseUrl[baseUrl.length - 1] === '/') {
+    baseUrl = baseUrl.slice(0, -1)
+  }
 
-S3Backend.prototype.createMetaStream = function getUser(options) {
-  throw new Error('Not Implemented')
-}
+  if (meta.versions) {
+    Object.keys(meta.versions).forEach(function(version) {
+      var url = baseUrl + join('/', escaped, '-', escaped + '-' + version + '.tgz')
+      meta.versions[version].dist = meta.versions[version].dist || {}
+      meta.versions[version].dist.tarball = url
 
-S3Backend.prototype.createStream = function getUser(options) {
-  throw new Error('Not Implemented')
+      if(!meta.versions[version]._id) {
+        meta.versions[version]._id = name + '@' + version
+      }
+    })
+  }
+
+  this._setMeta(name, meta, done)
 }
 
 S3Backend.prototype.getTarball = function getTarball(_name, version) {
@@ -59,9 +66,10 @@ S3Backend.prototype.getTarball = function getTarball(_name, version) {
     name = (this.options.tarballs.prefix || '') + name
   }
 
-  params.Key = name + '@' + version + '.tgz'
+  params.Key = name + '/-/' + name + '-' + version + '.tgz'
 
   this.s3.getObject(params, function write(err, data) {
+    console.log(err, params)
     if (err) return stream.emit('error', err)
     stream.end(data.Body)
   })
@@ -79,7 +87,7 @@ S3Backend.prototype.setTarball = function setTarball(_name, version) {
     name = (this.options.tarballs.prefix || '') + name
   }
 
-  params.Key = name + '@' + version + '.tgz'
+  params.Key = name + '/-/' + name + '-' + version + '.tgz'
   params.ContentType = 'application/x-compressed'
   params.Body = stream
 
@@ -100,12 +108,46 @@ S3Backend.prototype.removeTarball = function removeTarball(_name, version, _done
     name = (this.options.tarballs.prefix || '') + name
   }
 
-  params.Key = name + '@' + version + '.tgz'
+  params.Key = name + '/-/' + name + '-' + version + '.tgz'
 
   this.s3.deleteObject(params, function removed(err, data) {
     if (err) return done(err, null)
     done(null)
   })
+}
+
+S3Backend.prototype.getFileList = function getFileList(bucket, prefix, ignores, done) {
+  var params = {Bucket: bucket, Delimiter: '/'}
+  if ('prefix') params.Prefix = prefix
+  var backend = this
+  var items = []
+
+  getSome()
+
+  function getSome(marker) {
+    if(marker) params.marker = marker
+    backend.s3.listObjects(params, function gotSome(err, data) {
+      if (err) return done(err)
+      items = items.concat(data.Contents.map(addName).filter(notIgnored))
+      if (data.NextMarker) return getSome(data.NextMarker)
+      done(null, items)
+    })
+  }
+
+  function addName(item) {
+    var name = item && unescape(item.Key.slice(prefix.length))
+    if(!name) return null
+    return {name: name, params: {Bucket: bucket, Key: item.Key}}
+  }
+
+  function notIgnored(name) {
+    if (!name) return false
+    for (var i = ignores.length - 1; i >= 0; --i) {
+      if (ignores.test(name)) return false
+    }
+
+    return true
+  }
 }
 
 function getter(type, prefix) {
@@ -203,6 +245,23 @@ function remover(type, prefix, eventName, getter) {
   }
 }
 
+function streamer(type, prefix, ignores) {
+  return function stream(options) {
+    var stream = new ContentStream(this.s3, options)
+    var bucket = this.options.s3.params.Bucket
+    if (this.options[type] && this.options[type].Bucket) {
+      bucket = this.options[type].Bucket
+    }
+
+    this.getFileList(bucket, prefix, ignores, function gotFiles(err, items) {
+      if (err) return stream.emit('error', err)
+      stream.init(items)
+    })
+
+    return stream
+  }
+}
+
 function escape(name) {
   return name.replace('/', '%2f')
 }
@@ -210,44 +269,67 @@ function escape(name) {
 function unescape(name) {
   return name.replace('%2f', '/')
 }
-/*
 
-  function streamAll(dir) {
-    return function stream_data(options) {
-      return jrs(dir, options).pipe(unescape_stream(options))
-    }
+function ContentStream(s3, options) {
+  if (!(this instanceof ContentStream)) {
+    return new ContentStream(s3, options)
   }
 
-  function getTarball(name, version) {
-    return fs.createReadStream(
-        join(tarballs_dir, qs.escape(name) + '@' + version + '.tgz')
-    )
-  }
+  Readable.call(this, {objectMode: true})
+  this.options = options || {}
+  this.reading = false
+  this.items = null
+  this.s3 = s3
+}
 
-  function setTarball(name, version) {
-    return fs.createWriteStream(
-        join(tarballs_dir, qs.escape(name) + '@' + version + '.tgz')
-    )
-  }
+ContentStream.prototype = Object.create(Readable.prototype)
+ContentStream.prototype.constructor = ContentStream
 
-  function removeTarball(name, version, callback) {
-    fs.unlink(join(tarballs_dir, qs.escape(name) + '@' + version + '.tgz'), callback)
+ContentStream.prototype.init = function init(items) {
+  var opts = this.options
+  this.items = items.filter(byRange)
+  if (opts.reverse) this.items.reverse()
+  if (opts.limit >= 0) this.items = items.slice(opts.limit)
+  if (this.reading) this.readOne()
+
+  function byRange(item) {
+    if (opts.gt && !(item.name > opts.gt)) return false
+    if (opts.start && !(item.name >= opts.start)) return false
+    if (opts.gte && !(item.name >= opts.gt)) return false
+    if (opts.lt && !(item.name < opts.gt)) return false
+    if (opts.lte && !(item.name <= opts.gt)) return false
+    if (opts.end && !(item.name <= opts.end)) return false
+    return true
   }
 }
 
-function unescape_stream(options) {
-  if(options && !options.keys && typeof options.keys !== 'undefined') {
-    return through()
+ContentStream.prototype._read = function read() {
+  if (this.items) return this.readOne()
+  this.reading = true
+}
+
+ContentStream.prototype.readOne = function readOne() {
+  if (!this.items || !this.items.length) return this.push(null)
+  var item = this.items.shift()
+  var stream = this
+
+  if (!stream.options.values && typeof stream.options.values !== 'undefined') {
+    return stream.push(item.name)
   }
 
-  return through(function unescape(data) {
-    if(typeof data === 'object') {
-      data.key = qs.unescape(data.key)
-      return this.queue(data)
+  this.s3.getObject(item.params, function parse(err, data) {
+    if (err) return stream.emit('error', err)
+
+    try {
+      data = JSON.parse(data.Body.toString())
+    } catch (err) {
+      return stream.emit('error', err)
     }
 
-    return this.queue(qs.unescape(data))
+    if (!stream.options.keys && typeof stream.options.keys !== 'undefined') {
+      return stream.push(data)
+    }
+
+    stream.push({key: item.name, value: data})
   })
 }
-function noop() {}
-*/
