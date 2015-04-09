@@ -69,7 +69,6 @@ S3Backend.prototype.getTarball = function getTarball(_name, version) {
   params.Key = name + '/-/' + name + '-' + version + '.tgz'
 
   this.s3.getObject(params, function write(err, data) {
-    console.log(err, params)
     if (err) return stream.emit('error', err)
     stream.end(data.Body)
   })
